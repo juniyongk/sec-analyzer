@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { AnalysisMode } from '@/types/analysis';
 
 const modes: { id: AnalysisMode; title: string; cost: string; description: string; time: string }[] = [
@@ -92,6 +93,12 @@ export default function Home() {
           <p className="text-lg text-slate-600">
             AI-powered investment thesis from any SEC filing
           </p>
+          <Link
+            href="/history"
+            className="inline-block mt-3 text-sm text-blue-600 hover:text-blue-700 font-medium"
+          >
+            View Past Analyses
+          </Link>
         </div>
 
         {/* EDGAR URL Input */}

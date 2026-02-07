@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { AnalysisResult, ThesisPoint, RedFlag } from '@/types/analysis';
 import ExpandableSection from './ExpandableSection';
 
@@ -496,6 +497,57 @@ export default function AnalysisResults({ analysis }: AnalysisResultsProps) {
           </p>
         </div>
       )}
+
+      {/* Export Buttons */}
+      <ExportButtons analysisId={analysis.id} companyName={analysis.companyName} />
+    </div>
+  );
+}
+
+function ExportButtons({ analysisId, companyName }: { analysisId: string; companyName: string }) {
+  const [exporting, setExporting] = useState<string | null>(null);
+
+  const handleExport = async (format: 'markdown' | 'json') => {
+    setExporting(format);
+    try {
+      const res = await fetch('/api/export', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ analysisId, format }),
+      });
+      if (!res.ok) throw new Error('Export failed');
+      const blob = await res.blob();
+      const ext = format === 'markdown' ? 'md' : 'json';
+      const filename = `${companyName.replace(/[^a-zA-Z0-9]/g, '_')}_analysis.${ext}`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      alert('Failed to export. Please try again.');
+    } finally {
+      setExporting(null);
+    }
+  };
+
+  return (
+    <div className="mt-8 flex flex-wrap gap-3 justify-center">
+      <button
+        onClick={() => handleExport('markdown')}
+        disabled={!!exporting}
+        className="px-5 py-2.5 bg-slate-900 text-white rounded-lg font-medium hover:bg-slate-800 transition-colors disabled:opacity-50 cursor-pointer"
+      >
+        {exporting === 'markdown' ? 'Exporting...' : 'Export Markdown'}
+      </button>
+      <button
+        onClick={() => handleExport('json')}
+        disabled={!!exporting}
+        className="px-5 py-2.5 border-2 border-slate-300 text-slate-700 rounded-lg font-medium hover:border-slate-400 transition-colors disabled:opacity-50 cursor-pointer"
+      >
+        {exporting === 'json' ? 'Exporting...' : 'Export JSON'}
+      </button>
     </div>
   );
 }

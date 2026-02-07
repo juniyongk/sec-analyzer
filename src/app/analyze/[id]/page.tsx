@@ -113,12 +113,20 @@ export default function AnalyzePage({ params }: { params: Promise<{ id: string }
       {/* Back nav */}
       <div className="border-b border-slate-100">
         <div className="max-w-5xl mx-auto px-6 py-3">
-          <button
-            className="text-sm text-blue-600 hover:text-blue-700 cursor-pointer"
-            onClick={() => router.push('/')}
-          >
-            &larr; New Analysis
-          </button>
+          <div className="flex gap-4">
+            <button
+              className="text-sm text-blue-600 hover:text-blue-700 cursor-pointer"
+              onClick={() => router.push('/')}
+            >
+              &larr; New Analysis
+            </button>
+            <button
+              className="text-sm text-slate-500 hover:text-slate-700 cursor-pointer"
+              onClick={() => router.push('/history')}
+            >
+              History
+            </button>
+          </div>
         </div>
       </div>
       <AnalysisResults analysis={analysis} />

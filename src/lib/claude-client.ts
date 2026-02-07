@@ -48,29 +48,49 @@ export class ClaudeClient {
     this.systemPrompt = buildSystemPrompt(filing);
   }
 
-  private async call(prompt: string, model: string, step: string): Promise<string> {
-    const response = await this.client.messages.create({
-      model,
-      max_tokens: 8192,
-      system: this.systemPrompt,
-      messages: [{ role: 'user', content: prompt }],
-    });
+  private async call(prompt: string, model: string, step: string, retries = 2): Promise<string> {
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        const response = await this.client.messages.create({
+          model,
+          max_tokens: 8192,
+          system: this.systemPrompt,
+          messages: [{ role: 'user', content: prompt }],
+        });
 
-    const usage = response.usage;
-    const cost = calculateCost(
-      { input_tokens: usage.input_tokens, output_tokens: usage.output_tokens },
-      model
-    );
-    this.calls.push({
-      step,
-      model,
-      inputTokens: usage.input_tokens,
-      outputTokens: usage.output_tokens,
-      cost,
-    });
+        const usage = response.usage;
+        const cost = calculateCost(
+          { input_tokens: usage.input_tokens, output_tokens: usage.output_tokens },
+          model
+        );
+        this.calls.push({
+          step,
+          model,
+          inputTokens: usage.input_tokens,
+          outputTokens: usage.output_tokens,
+          cost,
+        });
 
-    const block = response.content[0];
-    return block.type === 'text' ? block.text : '';
+        const block = response.content[0];
+        return block.type === 'text' ? block.text : '';
+      } catch (err: unknown) {
+        const isRetryable = err instanceof Error && (
+          err.message.includes('overloaded') ||
+          err.message.includes('rate_limit') ||
+          err.message.includes('529') ||
+          err.message.includes('500') ||
+          err.message.includes('timeout')
+        );
+
+        if (attempt < retries && isRetryable) {
+          console.warn(`[${step}] Attempt ${attempt + 1} failed, retrying in ${(attempt + 1) * 3}s...`, err instanceof Error ? err.message : err);
+          await new Promise(r => setTimeout(r, (attempt + 1) * 3000));
+          continue;
+        }
+        throw new Error(`Claude API error in ${step}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    throw new Error(`Claude API failed after ${retries + 1} attempts for ${step}`);
   }
 
   private parseJSON<T>(text: string): T {

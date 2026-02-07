@@ -4,7 +4,8 @@ import { ParsedFiling } from '@/types/edgar';
 import { fetchEdgarHtml, parseEdgarHtml } from './edgar-parser';
 import { mockQuickScan, mockStandardAnalysis, mockDeepDive } from './claude-mock';
 import { ClaudeClient } from './claude-client';
-import { setAnalysis, updateAnalysis } from './store';
+import { setAnalysis, updateAnalysis, getAnalysis } from './store';
+import { saveAnalysisToFile } from './persistence';
 
 const useMock = !process.env.ANTHROPIC_API_KEY;
 
@@ -48,7 +49,15 @@ export function startAnalysis(
   setAnalysis(id, analysis);
 
   // Run analysis async
-  runAnalysis(id, edgarUrl, mode, peers).catch(err => {
+  runAnalysis(id, edgarUrl, mode, peers).then(() => {
+    // Save completed analysis to disk for history
+    const completed = getAnalysis(id);
+    if (completed && completed.status === 'complete') {
+      saveAnalysisToFile(completed).catch(err =>
+        console.error('Failed to persist analysis:', err)
+      );
+    }
+  }).catch(err => {
     console.error('Analysis failed:', err);
     updateAnalysis(id, {
       status: 'error',
@@ -207,6 +216,16 @@ async function runMockAnalysis(
   });
 }
 
+// Helper to run a step safely - returns null on failure instead of crashing
+async function safeStep<T>(label: string, fn: () => Promise<T>): Promise<T | null> {
+  try {
+    return await fn();
+  } catch (err) {
+    console.error(`[${label}] Step failed:`, err instanceof Error ? err.message : err);
+    return null;
+  }
+}
+
 async function runRealAnalysis(
   id: string,
   filing: ParsedFiling,
@@ -215,7 +234,7 @@ async function runRealAnalysis(
 ): Promise<void> {
   const client = new ClaudeClient(filing);
 
-  // Quick scan
+  // Quick scan - this is required, so we let it throw
   updateAnalysis(id, { progress: 30, currentStep: 'Generating investment thesis...' });
   const quickResult = await client.quickScan();
 
@@ -241,20 +260,20 @@ async function runRealAnalysis(
     return;
   }
 
-  // Standard: run financial, tone, peers in parallel
+  // Standard: run financial, tone, peers in parallel - each can fail independently
   updateAnalysis(id, { progress: 50, currentStep: 'Analyzing financial details...' });
   const [financialResult, toneResult, peerResult] = await Promise.all([
-    client.financialAnalysis(),
-    client.toneAnalysis(),
-    client.peerComparison(peers),
+    safeStep('financial', () => client.financialAnalysis()),
+    safeStep('tone', () => client.toneAnalysis()),
+    safeStep('peers', () => client.peerComparison(peers)),
   ]);
 
   updateAnalysis(id, {
     progress: mode === 'standard' ? 85 : 65,
     currentStep: mode === 'standard' ? 'Finalizing...' : 'Running deep dive...',
-    financialAnalysis: financialResult.financialAnalysis,
-    toneAnalysis: toneResult.toneAnalysis,
-    peerComparison: peerResult.peerComparison,
+    ...(financialResult && { financialAnalysis: financialResult.financialAnalysis }),
+    ...(toneResult && { toneAnalysis: toneResult.toneAnalysis }),
+    ...(peerResult && { peerComparison: peerResult.peerComparison }),
   });
 
   if (mode === 'standard') {
@@ -269,10 +288,10 @@ async function runRealAnalysis(
         calls: client.getCalls(),
         total: totalCost,
         breakdown: {
-          financial: financialResult.cost.cost,
+          financial: financialResult?.cost.cost || 0,
           redFlags: quickResult.cost.breakdown.redFlags,
-          tone: toneResult.cost.cost,
-          peers: peerResult.cost.cost,
+          tone: toneResult?.cost.cost || 0,
+          peers: peerResult?.cost.cost || 0,
           synthesis: quickResult.cost.breakdown.synthesis,
         },
       },
@@ -280,13 +299,13 @@ async function runRealAnalysis(
     return;
   }
 
-  // Deep dive: segments, competitors, footnotes, highlights
+  // Deep dive: segments, competitors, footnotes, highlights - each can fail independently
   updateAnalysis(id, { progress: 70, currentStep: 'Analyzing segments and competitors...' });
   const [segmentResult, competitorResult, footnoteResult, highlightResult] = await Promise.all([
-    client.segmentAnalysis(),
-    client.competitorResearch(),
-    client.footnoteDeepDive(),
-    client.smartHighlights(),
+    safeStep('segments', () => client.segmentAnalysis()),
+    safeStep('competitors', () => client.competitorResearch()),
+    safeStep('footnotes', () => client.footnoteDeepDive()),
+    safeStep('highlights', () => client.smartHighlights()),
   ]);
 
   const totalCost = client.getTotalCost();
@@ -295,23 +314,23 @@ async function runRealAnalysis(
     progress: 100,
     currentStep: 'Analysis complete',
     completedAt: new Date().toISOString(),
-    segmentAnalysis: segmentResult.segmentAnalysis,
-    competitorIntel: competitorResult.competitorIntel,
-    footnoteAnalysis: footnoteResult.footnoteAnalysis,
-    smartHighlights: highlightResult.smartHighlights,
+    ...(segmentResult && { segmentAnalysis: segmentResult.segmentAnalysis }),
+    ...(competitorResult && { competitorIntel: competitorResult.competitorIntel }),
+    ...(footnoteResult && { footnoteAnalysis: footnoteResult.footnoteAnalysis }),
+    ...(highlightResult && { smartHighlights: highlightResult.smartHighlights }),
     cost: {
       mode: 'deep',
       calls: client.getCalls(),
       total: totalCost,
       breakdown: {
-        financial: financialResult.cost.cost,
+        financial: financialResult?.cost.cost || 0,
         redFlags: quickResult.cost.breakdown.redFlags,
-        tone: toneResult.cost.cost,
-        peers: peerResult.cost.cost,
+        tone: toneResult?.cost.cost || 0,
+        peers: peerResult?.cost.cost || 0,
         synthesis: quickResult.cost.breakdown.synthesis,
-        segments: segmentResult.cost.cost,
-        competitors: competitorResult.cost.cost,
-        footnotes: footnoteResult.cost.cost,
+        segments: segmentResult?.cost.cost || 0,
+        competitors: competitorResult?.cost.cost || 0,
+        footnotes: footnoteResult?.cost.cost || 0,
       },
     },
   });
