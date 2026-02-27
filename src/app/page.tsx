@@ -48,7 +48,7 @@ export default function Home() {
     setPeers(prev => prev.filter(p => p !== ticker));
   };
 
-  const handleAnalyze = async () => {
+  const handleAnalyze = () => {
     if (!edgarUrl.trim()) {
       setError('Please enter an EDGAR URL');
       return;
@@ -56,28 +56,14 @@ export default function Home() {
     setError('');
     setLoading(true);
 
-    try {
-      const response = await fetch('/api/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          edgarUrl: edgarUrl.trim(),
-          mode,
-          peers: peers.length > 0 ? peers : undefined,
-        }),
-      });
-
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.error || 'Failed to start analysis');
-      }
-
-      const data = await response.json();
-      router.push(`/analyze/${data.analysisId}`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Something went wrong');
-      setLoading(false);
+    const params = new URLSearchParams({
+      url: edgarUrl.trim(),
+      mode,
+    });
+    if (peers.length > 0) {
+      params.set('peers', peers.join(','));
     }
+    router.push(`/analyze?${params.toString()}`);
   };
 
   const estimatedCost = modes.find(m => m.id === mode)?.cost || '';
